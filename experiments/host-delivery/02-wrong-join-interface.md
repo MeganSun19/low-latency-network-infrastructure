@@ -1,93 +1,97 @@
 # 02 — Multicast membership on the wrong interface
 
-## Hypothesis
+## Purpose
 
-Joining the feed on the management interface moves host membership away from
-the routed market-data link. Leaf1 then loses receiver interest, removing the
-downstream multicast branch. Correcting the join should restore the branch.
+Trace a receiver's source-specific multicast membership from its socket to the
+leaf's IGMP/PIM forwarding state. Change only receiver-a's join interface;
+publisher-a and receiver-b remain running as a control.
 
-Start with [normal reception](../../lab/README.md). Keep the publisher and
-receiver-b running throughout.
-
-## Inject and inspect
-
-Stop only receiver-a using Ctrl-C in its own workload terminal. Check that its
-old socket and group membership have gone, and discover the management address:
+Start with the [shared lab](../../lab/README.md). Stop receiver-a from its own
+workload terminal with Ctrl-C. In the container, confirm its socket and group
+membership have cleared, and discover the management address:
 
 ```sh
-docker exec -it clab-marketdata-ceos-receiver-a sh
+# Commands inside receiver-a
 ss -uanp
 ip maddr show dev eth1
 ip -4 addr show dev eth0
-exit
-docker inspect --format '{{.State.Pid}}' clab-marketdata-ceos-receiver-a
+
+# Recorded state after stopping the original receiver
+# UDP 20001 socket: absent
+# Feed group 232.10.1.1 on eth1: absent
+# Management address: 172.31.250.3
 ```
 
-On the host, replace the two uppercase placeholders with the observed values:
+On Ubuntu1, get the current receiver-a container PID and use it as the target
+for `nsenter`. Start a receiver joined on the management address:
 
 ```sh
+# Commands on Ubuntu1; substitute the current numeric container PID
+docker inspect --format '{{.State.Pid}}' clab-marketdata-ceos-receiver-a
 nsenter --target RECEIVER_A_CONTAINER_PID --net python3 -u workloads/marketdata.py receive \
-  --interface MANAGEMENT_IP --port 20001 \
+  --interface 172.31.250.3 --port 20001 \
   --subscription 1,172.16.1.2,232.10.1.1 --duration 7200 \
   | tee /tmp/e04-wrong-interface.log
 ```
 
-Inspect receiver-a:
+Inspect the host and leaf state. Stop tcpdump with Ctrl-C after a bounded
+observation period:
 
 ```sh
-docker exec -it clab-marketdata-ceos-receiver-a sh
+# Commands inside receiver-a
 ss -uanp
 ip maddr show dev eth0
 ip maddr show dev eth1
 cat /proc/net/igmp
 tcpdump -pni eth1 \
   'udp and src host 172.16.1.2 and dst host 232.10.1.1 and dst port 20001'
+
+# Recorded host and capture output
+# UDP socket: 0.0.0.0:20001 exists
+# 232.10.1.1 is joined on eth0 and absent from eth1
+# /proc/net/igmp group entry 01010AE8 is under eth0
+# tcpdump: 0 packets captured, 0 received by filter, 0 dropped by kernel
 ```
 
-Stop capture with Ctrl-C after a bounded observation period. In a host terminal:
-
-```sh
-docker exec -it clab-marketdata-ceos-leaf1 Cli
-enable
+```text
+# Commands in the leaf1 EOS CLI
 show ip igmp groups 232.10.1.1 detail
 show ip pim upstream joins 232.10.1.1
 show ip mroute 232.10.1.1
+
+# Recorded forwarding state
+# IGMP group: no entry
+# PIM upstream Join: no entry
+# mroute (172.16.1.2,232.10.1.1): flags PE; incoming interface Null; no OIL
 ```
 
-Allow membership withdrawal/aging; do not assume immediate state removal.
-
-## Observed results
-
-| Layer | Fault observation |
-| --- | --- |
-| UDP socket | Bound to 0.0.0.0:20001 |
-| Host membership | **232.10.1.1 on eth0, absent from eth1** |
-| Leaf1 IGMP / upstream Join | No entries for the group |
-| Leaf1 mroute | Source entry retained with Null incoming interface and no outgoing list |
-| eth1 capture | 0 matching packets during observation |
-| Control receiver | Advanced 18970 → 19052 |
-
-**The host's subscription interface explains both the network control state
-and the missing delivery.** The recorded capture duration was not retained,
-so zero packets is a bounded observation, not a long-term traffic assertion.
+Receiver-b advanced from sequence 18970 to 19052 during the observation,
+confirming that the publisher remained active. The capture duration was not
+retained; zero packets is a bounded observation for that run.
 
 ## Restore and verify
 
-Stop the wrong-interface receiver. Restart it using the normal receiver-a
-command from shared startup (`--interface 172.16.101.2`), writing to a new log
-such as `/tmp/e04-restored.log`. Repeat the host and EOS checks above.
+Stop the wrong-interface receiver. Query the current container PID and restart
+receiver-a with the normal market-data interface (`172.16.101.2`). Then repeat
+the host and EOS checks:
 
-Recorded recovery:
+```sh
+# Commands on Ubuntu1
+docker inspect --format '{{.State.Pid}}' clab-marketdata-ceos-receiver-a
+nsenter --target RECEIVER_A_CONTAINER_PID --net python3 -u workloads/marketdata.py receive \
+  --interface 172.16.101.2 --port 20001 \
+  --subscription 1,172.16.1.2,232.10.1.1 --duration 7200 \
+  | tee /tmp/e04-restored.log
 
-```text
-Host: 232.10.1.1 present on eth1, absent from eth0
-IGMP: Ethernet4; INCLUDE; reporter 172.16.101.2; source 172.16.1.2
-PIM Join: neighbor 10.0.0.0 via Ethernet1; 172.16.1.2/32 SPT
-mroute: incoming Ethernet1; outgoing Ethernet4
-Receiver A: 20453, 20454, 20455 — in_order
-Receiver B: 20481, 20482, 20483 — in_order
+# Recorded recovery output
+# Host: 232.10.1.1 present on eth1, absent from eth0
+# IGMP: Ethernet4, INCLUDE, reporter 172.16.101.2, source 172.16.1.2
+# PIM Join: neighbor 10.0.0.0 via Ethernet1, source 172.16.1.2/32 SPT
+# mroute: incoming Ethernet1, outgoing Ethernet4
+# receiver-a: 20453, 20454, 20455 — in_order
+# receiver-b: 20481, 20482, 20483 — in_order
 ```
 
-The correction restored membership, forwarding and delivery without switch
-configuration changes. The restarted receiver establishes a new sequence
-baseline; cross-restart missing counts were not measured.
+The corrected host membership restored the downstream branch and application
+delivery without switch configuration changes. Restarting receiver-a reset its
+local sequence baseline, so cross-restart missing counts were not measured.
