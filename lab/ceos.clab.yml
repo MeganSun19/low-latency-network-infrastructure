@@ -1,0 +1,75 @@
+name: marketdata-ceos
+
+mgmt:
+  network: llni-mgmt
+  ipv4-subnet: 172.31.250.0/24
+
+topology:
+  kinds:
+    arista_ceos:
+      image: ceos:4.36.2F
+      enforce-startup-config: true
+
+  nodes:
+    spine1:
+      kind: arista_ceos
+      startup-config: ../configs/ceos/spine1.cfg
+
+    spine2:
+      kind: arista_ceos
+      startup-config: ../configs/ceos/spine2.cfg
+
+    leaf1:
+      kind: arista_ceos
+      startup-config: ../configs/ceos/leaf1.cfg
+
+    leaf2:
+      kind: arista_ceos
+      startup-config: ../configs/ceos/leaf2.cfg
+
+    publisher-a:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool@sha256:a8d96c19e593e227d7b16d320a04256ba00434028f0adb9f7da206bf098c7140
+      exec:
+        - ip link set dev eth1 up
+        - ip address replace 172.16.1.2/30 dev eth1
+        - ip route replace 232.0.0.0/8 dev eth1 src 172.16.1.2
+
+    publisher-b:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool@sha256:a8d96c19e593e227d7b16d320a04256ba00434028f0adb9f7da206bf098c7140
+      exec:
+        - ip link set dev eth1 up
+        - ip address replace 172.16.2.2/30 dev eth1
+        - ip route replace 232.0.0.0/8 dev eth1 src 172.16.2.2
+
+    receiver-a:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool@sha256:a8d96c19e593e227d7b16d320a04256ba00434028f0adb9f7da206bf098c7140
+      exec:
+        - ip link set dev eth1 up
+        - ip address replace 172.16.101.2/30 dev eth1
+        - ip route replace 172.16.1.0/30 via 172.16.101.1 dev eth1
+        - ip route replace 172.16.2.0/30 via 172.16.101.1 dev eth1
+        - ip route replace 232.0.0.0/8 dev eth1
+
+    receiver-b:
+      kind: linux
+      image: ghcr.io/hellt/network-multitool@sha256:a8d96c19e593e227d7b16d320a04256ba00434028f0adb9f7da206bf098c7140
+      exec:
+        - ip link set dev eth1 up
+        - ip address replace 172.16.102.2/30 dev eth1
+        - ip route replace 172.16.1.0/30 via 172.16.102.1 dev eth1
+        - ip route replace 172.16.2.0/30 via 172.16.102.1 dev eth1
+        - ip route replace 232.0.0.0/8 dev eth1
+
+  links:
+    - endpoints: ["spine1:eth1", "leaf1:eth1"]
+    - endpoints: ["spine1:eth2", "leaf2:eth1"]
+    - endpoints: ["spine2:eth1", "leaf1:eth2"]
+    - endpoints: ["spine2:eth2", "leaf2:eth2"]
+
+    - endpoints: ["publisher-a:eth1", "spine1:eth3"]
+    - endpoints: ["publisher-b:eth1", "spine2:eth3"]
+    - endpoints: ["receiver-a:eth1", "leaf1:eth4"]
+    - endpoints: ["receiver-b:eth1", "leaf2:eth4"]

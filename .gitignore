@@ -9,6 +9,13 @@ dist/
 results/raw/
 *.log
 .env
+__pycache__/
+*.pyc
+clab-*/
+images/
+*.tar
+*.tar.xz
+*.qcow2
 
 # Local-only planning and workspace instructions.
 .internal/
