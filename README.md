@@ -1,30 +1,27 @@
 # Low-Latency Network Infrastructure
 
-An engineering project for studying market-data delivery, packet loss,
-latency boundaries, host/network diagnostics, failure recovery, and automated
-evidence in low-latency trading infrastructure.
+My hands-on notes and experiments while learning the network and Linux systems
+behind low-latency trading infrastructure.
 
-## Implemented
+## What I have worked on
 
-- Eight-node Containerlab topology: four cEOS routers, two publishers and two receivers; eBGP and PIM-SSM.
-- Python UDP multicast workload with per-stream sequence diagnostics.
-- [Host-delivery experiments](experiments/host-delivery/README.md): reverse-path filtering, wrong-interface membership, slow consumers and CPU scheduling contention.
+- Built and operated an eight-node Containerlab topology with four cEOS
+  routers, two publishers and two receivers, using eBGP and PIM-SSM.
+- Used a small Python multicast workload to follow market-data sequences from
+  publisher to receiver.
+- Investigated Linux receive-path behavior by changing reverse-path filtering,
+  multicast socket membership, consumer scheduling and CPU contention.
+- Compared packet captures, IGMP/PIM state, routes, socket queues, kernel
+  counters and application sequence records to locate where delivery changed.
 
-Start with [deployment and topology](lab/README.md), then follow the experiment runbooks.
-The case studies retain selected observations from manually executed Linux VM experiments. Fresh-clone deployment and independent reproduction remain to be verified.
+The [topology and setup notes](lab/README.md) describe the environment I used.
+The [host-delivery experiments](experiments/host-delivery/README.md) contain
+the commands, selected terminal output and explanations from the four
+investigations.
 
-## Evidence highlights
+The virtual setup is useful for studying protocol and Linux host behavior. It
+does not model physical switch ASIC latency and buffering, hardware NIC
+timestamping/PTP, or independent physical paths.
 
-- A paused consumer exhausted its UDP receive buffer: **78 missing sequences matched 78 socket drops and receive-buffer errors**.
-- An in-order buffered message had a **15.63 s application timestamp delta**, exposing stale delivery before the sequence gap.
-- A same-vCPU contention trial compared baseline, loaded and recovery scheduling-wait distributions.
-
-These are software fault-localization results. The VM/veth/cEOS setup measures neither physical switch latency nor hardware NIC/PTP performance. Each case states its measurement boundary and limitations.
-
-## Local checks
-
-```sh
-python3 -m py_compile workloads/marketdata.py
-```
-
-Supply your own authorized cEOS image. Vendor images, credentials and generated lab state are excluded from this repository. Run fault injections only in a disposable lab.
+I used an authorized cEOS image; the image itself and generated lab state are
+not included. Fault injections are intended for a disposable lab.

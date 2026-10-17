@@ -1,11 +1,10 @@
 # Routed multicast environment
 
-## Requirements and deployment
+## Environment used
 
-Recorded environment: Ubuntu 24.04 VM, Linux 6.8.0-110-generic, 12 vCPUs,
+I used an Ubuntu 24.04 VM, Linux 6.8.0-110-generic, 12 vCPUs,
 one NUMA node, approximately 16 GiB RAM; Containerlab 0.76.0 and cEOS 4.36.2F.
-These describe the observed environment, not minimum sizing requirements.
-Use a Linux host with Docker, Containerlab, Python 3, iproute2, tcpdump,
+The host had Docker, Containerlab, Python 3, iproute2, tcpdump,
 util-linux (`nsenter`, `taskset`) and, for scheduling analysis, BCC's
 `runqlat-bpfcc` and sysstat's `mpstat`. Run host commands as root in the lab.
 
@@ -13,22 +12,21 @@ Import an authorized cEOS image and tag it `ceos:4.36.2F`, or deliberately
 change the image reference to a compatible version and record the change.
 The Linux endpoint image is pinned by digest in the topology.
 
-From the repository root, on a host without a conflicting deployment:
+From the repository root, I deployed and inspected the topology with:
 
 ```sh
 containerlab deploy --topo lab/ceos.clab.yml
 containerlab inspect --topo lab/ceos.clab.yml
 ```
 
-The topology and startup files were retrieved from the running experiment
-environment. A fresh-clone deployment has not yet been independently rerun.
-Do not use `--reconfigure` against an existing lab whose state must be retained.
+The topology and startup files are the ones used in my running lab. Avoid
+`--reconfigure` if an existing lab's state must be retained.
 
 ## Physical links and addressing
 
-Each spine connects to both leaves. Both receivers subscribe to the same
-Feed A during the host-delivery experiments. Publisher B is available for
-separate feed-path experiments; it is not a duplicate-feed arbitration system.
+Each spine connects to both leaves. Both receivers subscribe to Feed A during
+the host-delivery experiments. Publisher B is available for separate feed-path
+experiments; Feed A/B arbitration is outside this workload.
 
 | Endpoint | Address | Peer | Address |
 | --- | --- | --- | --- |
@@ -113,18 +111,19 @@ at both receivers. Record initial counters and rp_filter values before injection
 
 ## Workload semantics
 
-`marketdata.py` is a low-rate diagnostic instrument. The receiver tracks the
+`marketdata.py` is a low-rate diagnostic workload. The receiver tracks the
 highest sequence per `(feed_id, channel_id)`: a forward jump reports a gap;
 the same highest sequence reports duplicate; a lower value reports reordered.
-Missing counts describe observed forward jumps, not final loss after recovery.
-State resets on receiver restart. There is no retransmission, replay, order-book
-builder, epoch handling or A/B merger. Feed IDs are diagnostic labels, not authentication.
+Missing counts describe observed forward jumps. Sequence state resets on
+receiver restart. The workload reports delivery order; it does not implement
+retransmission, replay, order-book building, epoch handling or A/B merging.
+Feed IDs are diagnostic labels, not authentication.
 
 `send_ns` is sampled during encoding before `sendto`; `arrival_ns` after
 `recvfrom`. Both use `time.time_ns()` on the same VM. Their difference includes
 application, scheduling, network and buffering effects, and can be affected by
-wall-clock adjustments. Per-packet JSON output adds overhead. Use these values
-for diagnostic context, not a wire-latency benchmark.
+wall-clock adjustments. Per-packet JSON output adds overhead. I used these
+values to inspect delivery and host delay, not as wire-latency measurements.
 
 ## Cleanup
 

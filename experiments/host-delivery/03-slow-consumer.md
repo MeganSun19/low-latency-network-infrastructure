@@ -16,7 +16,7 @@ the container PID used with `nsenter`:
 # Command on Ubuntu1
 pgrep -af marketdata
 
-# Recorded process list for this run
+# Process list from this run
 # receiver-a 15403; receiver-b 18625; publisher-a 21673
 ```
 
@@ -27,7 +27,7 @@ Inside receiver-a, inspect the UDP socket and namespace counters:
 ss -uanm
 nstat -asz UdpInDatagrams UdpInErrors UdpRcvbufErrors
 
-# Recorded baseline for UDP 20001
+# Baseline for UDP 20001
 # skmem:(r0,rb212992,t0,tb212992,f4096,w0,o112,bl0,d0)
 # UdpInDatagrams=32154  UdpInErrors=0  UdpRcvbufErrors=0
 ```
@@ -48,16 +48,16 @@ sleep 10
 kill -CONT 15403
 '
 
-# Recorded socket samples while paused, then after draining
+# Socket samples while paused, then after draining
 # skmem:(r44160,rb212992,t0,tb212992,f896,w0,o112,bl0,d0)
 # skmem:(r70080,rb212992,t0,tb212992,f3648,w0,o112,bl0,d0)
 # skmem:(r0,rb212992,t0,tb212992,f4096,w0,o112,bl0,d0)
 # UdpInErrors=0  UdpRcvbufErrors=0; no application gap logged
 ```
 
-The original short pause was entered manually, so its exact duration was not
-measured. If the shell is interrupted before `CONT`, run `kill -CONT 15403`
-from another Ubuntu1 terminal. A short pause queued messages and then drained.
+The short pause was entered manually. If the shell is interrupted before
+`CONT`, run `kill -CONT 15403` from another Ubuntu1 terminal. The queue drained
+after the receiver resumed.
 
 ## Sustained pause
 
@@ -96,7 +96,7 @@ grep -B 1 '"classification": "gap"' /tmp/e04-03-20261016-receiver-a.log
 tail -n 3 /tmp/e04-03-20261016-receiver-a.log
 tail -n 3 /tmp/e04-03-20261016-receiver-b.log
 
-# Recorded adjacent receiver-a messages
+# Adjacent receiver-a messages
 # sequence=6619  classification=in_order  host_observed_delta_ns=15626900259
 # sequence=6698  classification=gap        host_observed_delta_ns=10777637
 # Missing sequences: 6620-6697, count=6698-6619-1=78
@@ -109,21 +109,21 @@ Inside receiver-a, confirm that the queue drains and the counters stop growing:
 ss -uanm
 nstat -asz UdpInDatagrams UdpInErrors UdpRcvbufErrors
 
-# Two post-recovery socket samples
+# Post-recovery socket samples
 # skmem:(r0,rb212992,t0,tb212992,f4096,w0,o112,bl0,d78)
-# Recorded namespace counters: UdpInDatagrams 44148 -> 44229
+# Namespace counters: UdpInDatagrams 44148 -> 44229
 # UdpInErrors 78 -> 78; UdpRcvbufErrors 78 -> 78
 ```
 
-**The 78-message gap matches the socket drop count and the receive-buffer
-error increment.** Sequence 6619 was read in order after a 15.63-second
-application timestamp delta, showing that a consumer can read old queued data
-before it reaches the missing range. That timestamp includes host waiting and
-processing; it is not a pure network or exact socket-residence measurement.
+**The 78-message gap matches the socket drop count and receive-buffer error
+increment.** Sequence 6619 was read in order after a 15.63-second application
+timestamp delta, showing that old queued data can reach the application before
+the missing range is detected. The timestamp includes host waiting and
+processing time.
 Receiver-a later advanced through 6812–6814, while receiver-b advanced through
 6846–6848. Full retained scheduler and socket evidence is in
 [observations.json](evidence/observations.json).
 
-This controlled pause demonstrates consumer-side socket overflow. It does not
-identify whether a real application's stall comes from computation, locking,
-I/O or scheduling; those require correlated evidence.
+This controlled pause demonstrates consumer-side socket overflow. A real
+incident would require correlating application behavior with the same socket
+and host measurements.

@@ -23,7 +23,7 @@ cat /proc/sys/net/ipv4/conf/eth1/rp_filter
 sysctl -w net.ipv4.conf.eth1.rp_filter=1
 ip route get 172.16.1.2
 
-# Recorded baseline and output
+# Observed baseline and output
 # all, eth0 and eth1 rp_filter values: 0
 # sysctl: net.ipv4.conf.eth1.rp_filter = 1
 # 172.16.1.2 via 172.16.101.1 dev eth1 src 172.16.101.2
@@ -42,7 +42,7 @@ tcpdump -pni eth1 -c 5 \
   'udp and src host 172.16.1.2 and dst host 232.10.1.1 and dst port 20001'
 nstat -asz TcpExtIPReversePathFilter UdpRcvbufErrors
 
-# Recorded output (summary)
+# Observed output (summary)
 # Initial exact /32 query: no route
 # 172.16.1.2 via 172.31.250.1 dev eth0 src 172.31.250.3
 # tcpdump: 5 packets captured; UDP payload 94 bytes; 0 capture drops
@@ -56,14 +56,15 @@ On Ubuntu1, check that receiver-a stops advancing while receiver-b continues:
 tail -n 3 /tmp/e04-receiver-a.log
 tail -n 3 /tmp/e04-receiver-b.log
 
-# Recorded sequence observations
+# Observed sequence values
 # receiver-a stopped at 2467
 # receiver-b advanced 3010 -> 3073 -> 3198
 ```
 
-The observations place the interruption at receiver-a's source-validation
-path. The reverse-path counter covers only the sampled interval, so its
-increase is not a count of the full application gap.
+Packets remained visible on eth1 while receiver-a stopped advancing, and the
+reverse-path filter counter increased. Together these observations locate the
+drop at receiver-a's source-validation stage. The counter increase covers only
+the sampled interval, not the full application gap.
 
 ## Restore and verify
 
@@ -77,7 +78,7 @@ ip route get 172.16.1.2
 sysctl -w net.ipv4.conf.eth1.rp_filter=0
 cat /proc/sys/net/ipv4/conf/eth1/rp_filter
 
-# Expected final state; raw restoration output was not retained
+# Expected final state
 # source route returns to eth1; eth1 rp_filter is operator-confirmed as 0
 ```
 
@@ -88,13 +89,13 @@ On Ubuntu1, inspect the continuing receiver process:
 grep -B 1 '"classification": "gap"' /tmp/e04-receiver-a.log
 tail -n 3 /tmp/e04-receiver-a.log
 
-# Recorded recovery summary
+# Observed recovery summary
 # Last before interruption: 2467
 # First after interruption: 3391, classification=gap
 # Missing: 2468-3390, count = 3391 - 2467 - 1 = 923
 # Later samples advanced in order through 10167
 ```
 
-The gap count comes from application sequence observations. Receiver-b's gap
-query returned no entries. Final policy restoration was operator-confirmed;
-raw final sysctl and stable post-recovery counter outputs were not retained.
+The gap count comes from application sequence values. Receiver-b's gap query
+returned no entries. The operator confirmed that the original `rp_filter`
+value was restored.

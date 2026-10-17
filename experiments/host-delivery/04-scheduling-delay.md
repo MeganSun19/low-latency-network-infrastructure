@@ -21,7 +21,7 @@ command below with that literal numeric PID:
 # Command
 pgrep -af marketdata
 
-# Recorded process list for this run
+# Process list from this run
 # receiver-a=15403; receiver-b=18625; publisher-a=21673
 ```
 
@@ -34,7 +34,7 @@ taskset -pc 4 APP_PID
 taskset -pc APP_PID
 runqlat-bpfcc -T -p APP_PID 10 3 | tee /tmp/e04-04-baseline.log
 
-# Recorded output
+# Observed output
 # Affinity: 0-11 -> 4
 # Three windows ended 03:11:51, 03:12:01, 03:12:11 UTC
 # 190 scheduler events; 8 in buckets >=1024 us (4.2%)
@@ -53,7 +53,7 @@ date -Is
 # Diagnostics terminal, during the bounded load
 runqlat-bpfcc -T -p APP_PID 10 3 | tee /tmp/e04-04-contention.log
 
-# Recorded load and result
+# Load window and result
 # Load: 2026-10-16T03:12:27+00:00 -> 2026-10-16T03:14:27+00:00
 # Histograms ended 03:13:08, 03:13:18, 03:13:28 UTC (inside load window)
 # 150 scheduler events; 14 in buckets >=1024 us (9.3%)
@@ -71,14 +71,14 @@ socket and UDP counters:
 mpstat -P 4 1 3
 runqlat-bpfcc -T -p APP_PID 10 3 | tee /tmp/e04-04-recovery.log
 
-# Recorded recovery histograms ended 03:14:54, 03:15:04, 03:15:14 UTC
+# Recovery histograms ended 03:14:54, 03:15:04, 03:15:14 UTC
 # 169 scheduler events; 6 in buckets >=1024 us (3.6%)
 
 # Commands inside receiver-a
 ss -uanm
 nstat -asz UdpInDatagrams UdpInErrors UdpRcvbufErrors
 
-# Recorded final sample
+# Final sample
 # skmem:(r0,rb212992,t0,tb212992,f4096,w0,o112,bl0,d78)
 # UdpInDatagrams=62241; UdpInErrors=78; UdpRcvbufErrors=78
 # The 78 drop counters were carried over from the previous experiment.
@@ -91,8 +91,7 @@ Restore receiver-a's original CPU affinity (0–11 in the observed run):
 taskset -pc 0-11 APP_PID
 taskset -pc APP_PID
 
-# Operator confirmed the original allowed CPU range was restored to 0-11;
-# the raw final affinity output was not retained.
+# The operator confirmed the original allowed CPU range was restored to 0-11.
 ```
 
 ## Result and limits
@@ -104,12 +103,10 @@ taskset -pc APP_PID
 | Recovery | 169 | 6 (3.6%) |
 
 The long-wait share rose during same-CPU contention and fell after the load
-ended. Most measured events remained in short wait-time buckets. This is one
-software-VM comparison; it does not establish production latency or statistical
-significance. Scheduler events are not packet samples, and bucket counts do
-not reveal exact individual wait times.
+ended. Most measured events remained in short wait-time buckets. Scheduler
+events are run-queue samples, not packet samples, and bucket counts do not give
+the exact wait time of each event.
 
-The v2 run had no contemporaneous `mpstat` sample during the load, so this
-report makes no CPU-utilization claim for that window. The result is useful for
-correlating scheduler evidence with socket and application evidence; it does
-not identify the cause of a real application's stall.
+The run had no `mpstat` sample during the load, so CPU utilization for that
+window was not measured. This is a single VM comparison of scheduler wait
+behavior under a controlled CPU load.

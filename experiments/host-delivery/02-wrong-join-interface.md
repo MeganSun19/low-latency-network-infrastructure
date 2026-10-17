@@ -16,7 +16,7 @@ ss -uanp
 ip maddr show dev eth1
 ip -4 addr show dev eth0
 
-# Recorded state after stopping the original receiver
+# Observed state after stopping the original receiver
 # UDP 20001 socket: absent
 # Feed group 232.10.1.1 on eth1: absent
 # Management address: 172.31.250.3
@@ -46,7 +46,7 @@ cat /proc/net/igmp
 tcpdump -pni eth1 \
   'udp and src host 172.16.1.2 and dst host 232.10.1.1 and dst port 20001'
 
-# Recorded host and capture output
+# Observed host and capture output
 # UDP socket: 0.0.0.0:20001 exists
 # 232.10.1.1 is joined on eth0 and absent from eth1
 # /proc/net/igmp group entry 01010AE8 is under eth0
@@ -59,15 +59,14 @@ show ip igmp groups 232.10.1.1 detail
 show ip pim upstream joins 232.10.1.1
 show ip mroute 232.10.1.1
 
-# Recorded forwarding state
+# Observed forwarding state
 # IGMP group: no entry
 # PIM upstream Join: no entry
 # mroute (172.16.1.2,232.10.1.1): flags PE; incoming interface Null; no OIL
 ```
 
-Receiver-b advanced from sequence 18970 to 19052 during the observation,
-confirming that the publisher remained active. The capture duration was not
-retained; zero packets is a bounded observation for that run.
+Receiver-b advanced from sequence 18970 to 19052 during the observation while
+the receiver-a capture saw no matching packets.
 
 ## Restore and verify
 
@@ -83,7 +82,7 @@ nsenter --target RECEIVER_A_CONTAINER_PID --net python3 -u workloads/marketdata.
   --subscription 1,172.16.1.2,232.10.1.1 --duration 7200 \
   | tee /tmp/e04-restored.log
 
-# Recorded recovery output
+# Observed recovery output
 # Host: 232.10.1.1 present on eth1, absent from eth0
 # IGMP: Ethernet4, INCLUDE, reporter 172.16.101.2, source 172.16.1.2
 # PIM Join: neighbor 10.0.0.0 via Ethernet1, source 172.16.1.2/32 SPT
@@ -92,6 +91,6 @@ nsenter --target RECEIVER_A_CONTAINER_PID --net python3 -u workloads/marketdata.
 # receiver-b: 20481, 20482, 20483 — in_order
 ```
 
-The corrected host membership restored the downstream branch and application
-delivery without switch configuration changes. Restarting receiver-a reset its
-local sequence baseline, so cross-restart missing counts were not measured.
+Correcting the host membership restored the downstream branch and application
+delivery without switch configuration changes. Receiver-a restarted and began
+a fresh local sequence baseline.

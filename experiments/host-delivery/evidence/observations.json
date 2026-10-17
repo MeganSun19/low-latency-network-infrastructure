@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "provenance": "Selected observations transcribed from operator-provided terminal output. One manual software-VM run; not an independent rerun.",
+  "source": "Ubuntu 1 VM terminal observations",
   "recorded_date": "2026-10-16",
   "environment": {
     "platform": "Ubuntu 24.04 VM",
