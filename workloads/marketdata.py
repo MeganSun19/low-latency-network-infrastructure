@@ -16,6 +16,14 @@ HEADER = struct.Struct("!4sBBBBIQQH")
 
 IP_ADD_SOURCE_MEMBERSHIP = 39
 
+# Linux UAPI values verified on the Ubuntu 1 host. Python 3.12.3's socket
+# module does not expose these names in this environment.
+LINUX_SO_TIMESTAMPING = 37
+LINUX_SCM_TIMESTAMPING = LINUX_SO_TIMESTAMPING
+LINUX_SOF_TIMESTAMPING_RX_SOFTWARE = 1 << 3
+LINUX_SOF_TIMESTAMPING_SOFTWARE = 1 << 4
+SCM_TIMESTAMPING = struct.Struct("@6l")
+
 
 def encode_packet(feed_id, channel_id, sequence, payload):
     header = HEADER.pack(
@@ -134,11 +142,40 @@ def parse_subscription(value):
     return int(feed_id), source, group
 
 
+def decode_rx_software_timestamp(ancillary):
+    """Return the Linux SCM_TIMESTAMPING software RX time in nanoseconds."""
+    for level, cmsg_type, data in ancillary:
+        if level != socket.SOL_SOCKET or cmsg_type != LINUX_SCM_TIMESTAMPING:
+            continue
+        if len(data) < SCM_TIMESTAMPING.size:
+            continue
+
+        seconds, nanoseconds, *_ = SCM_TIMESTAMPING.unpack_from(data)
+        if seconds == 0 and nanoseconds == 0:
+            return None
+        if not 0 <= nanoseconds < 1_000_000_000:
+            return None
+        return seconds * 1_000_000_000 + nanoseconds
+
+    return None
+
+
 def receive(args):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("0.0.0.0", args.port))
     sock.settimeout(0.25)
+
+    if args.rx_sw_timestamp:
+        timestamp_flags = (
+            LINUX_SOF_TIMESTAMPING_RX_SOFTWARE
+            | LINUX_SOF_TIMESTAMPING_SOFTWARE
+        )
+        sock.setsockopt(
+            socket.SOL_SOCKET,
+            LINUX_SO_TIMESTAMPING,
+            timestamp_flags,
+        )
 
     expected_feeds = set()
 
@@ -164,11 +201,23 @@ def receive(args):
 
     while time.monotonic() < stop_at:
         try:
-            packet, sender = sock.recvfrom(65535)
+            if args.rx_sw_timestamp:
+                packet, ancillary, _, sender = sock.recvmsg(
+                    65535,
+                    socket.CMSG_SPACE(SCM_TIMESTAMPING.size),
+                )
+            else:
+                packet, sender = sock.recvfrom(65535)
+                ancillary = []
         except socket.timeout:
             continue
 
         arrival_ns = time.time_ns()
+        rx_software_ns = (
+            decode_rx_software_timestamp(ancillary)
+            if args.rx_sw_timestamp
+            else None
+        )
 
         try:
             message = decode_packet(packet)
@@ -212,24 +261,29 @@ def receive(args):
         counters[classification] += 1
         counters["received"] += 1
 
-        print(
-            json.dumps(
-                {
-                    "event": "packet",
-                    "classification": classification,
-                    "feed_id": feed_id,
-                    "channel_id": channel_id,
-                    "sequence": sequence,
-                    "sender": sender[0],
-                    "send_ns": message["send_ns"],
-                    "arrival_ns": arrival_ns,
-                    "host_observed_delta_ns": (
-                        arrival_ns - message["send_ns"]
-                    ),
-                },
-                sort_keys=True,
+        record = {
+            "event": "packet",
+            "classification": classification,
+            "feed_id": feed_id,
+            "channel_id": channel_id,
+            "sequence": sequence,
+            "sender": sender[0],
+            "send_ns": message["send_ns"],
+            "arrival_ns": arrival_ns,
+            "host_observed_delta_ns": arrival_ns - message["send_ns"],
+        }
+
+        if args.rx_sw_timestamp:
+            record["rx_software_ns"] = rx_software_ns
+            record["kernel_to_app_ns"] = (
+                arrival_ns - rx_software_ns
+                if rx_software_ns is not None
+                else None
             )
-        )
+            if rx_software_ns is None:
+                counters["rx_timestamp_missing"] += 1
+
+        print(json.dumps(record, sort_keys=True))
 
     missing_feeds = sorted(expected_feeds - seen_feeds)
 
@@ -276,6 +330,11 @@ def build_parser():
         required=True,
     )
     receiver.add_argument("--duration", type=float, default=8)
+    receiver.add_argument(
+        "--rx-sw-timestamp",
+        action="store_true",
+        help="include Linux software receive timestamps in packet records",
+    )
     receiver.set_defaults(handler=receive)
 
     return parser
